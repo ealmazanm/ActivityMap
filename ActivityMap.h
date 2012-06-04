@@ -41,10 +41,7 @@ public:
 		return Size(XRes, YRes);
 	}
 
-private:
-	XnPoint3D* convert2Points(const XnDepthPixel*);
-
-	inline int findCoordinate(float value, float minValue, float maxValue, double step)
+	inline int findCoordinate(float value, float minValue, float maxValue, double step) const
 	{
 		if (value < minValue)
 			value = minValue;
@@ -53,9 +50,13 @@ private:
 		return (int)floor((value-minValue)/step);
 	}
 
-	int XRes;
 	int depthStep;
 	int xStep;
+
+private:
+	XnPoint3D* convert2Points(const XnDepthPixel*);
+
+	int XRes;
 
 	const int NUM_SENSORS;
 
