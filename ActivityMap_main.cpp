@@ -1,5 +1,6 @@
 #include "ActivityMap.h"
 #include "BackgroundDepthSubtraction.h"
+#include "Clustering.h"
 
 
 
@@ -24,6 +25,7 @@ void updateActivityMap(Mat& activityMap, const ActivityMap* am, const XnPoint3D*
 int main()
 {
 	ActivityMap actMapCreator(2);
+	Clustering clusters;
 
 	KinectSensor kinects[2];
 	const XnDepthPixel* depthMaps[2];
@@ -96,6 +98,8 @@ int main()
 
 				updateActivityMap(*activityMap, &actMapCreator, p3D_1, nFPoints1);
 				updateActivityMap(*activityMap, &actMapCreator, p3D_2, nFPoints2);
+
+				clusters.clusterImage(*activityMap);
 
 				delete[]p3D_1;
 				delete[]p3D_2;
