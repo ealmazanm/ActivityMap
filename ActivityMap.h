@@ -17,10 +17,11 @@ using namespace std;
 using namespace cv;
 using namespace xn;
 
-const int REF_CAM = 2;
+const int REF_CAM = 1;
 
-const int MIN_X = -1500;
-const int MAX_X = 5000;
+//REF_CAM = 2
+const int MIN_X = -4500;
+const int MAX_X = 5500;
 const int MIN_Z = 500;
 const int MAX_Z = 5000;
 

@@ -27,6 +27,10 @@ ActivityMap::~ActivityMap(void)
 
 Mat* ActivityMap::createActivityMap(const KinectSensor* kinects, const XnDepthPixel** depthMaps, const XnRGB24Pixel** rgbMaps, bool trans)
 {
+	int shifted = 0;
+	if (!trans)
+		shifted = 3400;
+
 	Mat* activityMap = new Mat(Size(XRes, YRes), CV_8UC3);
 	Utils::initMat3u(*activityMap, 255);
 	Mat highestMap (YRes, XRes, CV_32F);
@@ -37,7 +41,7 @@ Mat* ActivityMap::createActivityMap(const KinectSensor* kinects, const XnDepthPi
 		//create list of xnPoint3D
 		XnPoint3D* depthPoints = convert2Points(depthMaps[i]);
 		XnPoint3D* realPoints = kinects[i].arrayBackProject(depthPoints);
-		if (trans && i+1 != REF_CAM)
+		if (trans && i != REF_CAM)
 			kinects[i].transformArray(realPoints);
 
 		allRealPoints[i] = realPoints;
@@ -54,9 +58,9 @@ Mat* ActivityMap::createActivityMap(const KinectSensor* kinects, const XnDepthPi
 			for (int j = 0; j < XN_VGA_X_RES; j++)
 			{
 				XnPoint3D p = allRealPoints[iter][i*XN_VGA_X_RES+j];
-				if (p.Z > 0 && p.Z < MAX_Z && p.Y < 0)
+				if (p.Z > 0 && p.Z < MAX_Z && p.Y < -500)
 				{
-					int xCoor = findCoordinate(p.X, MIN_X, MAX_X, xStep);
+					int xCoor = findCoordinate((p.X-shifted), MIN_X, MAX_X, xStep);
 					int yC = findCoordinate(p.Z, MIN_Z, MAX_Z, depthStep);
 
 					int yCoor = (YRes-1) - yC;
@@ -72,8 +76,12 @@ Mat* ActivityMap::createActivityMap(const KinectSensor* kinects, const XnDepthPi
 						ptr_h[xCoor] = p.Y;
 						XnRGB24Pixel color = rgbMaps[iter][i*XN_VGA_X_RES+j];
 						
-						if (!trans && iter == 0)
-							circle(*activityMap, Point((XRes/2)+xCoor, yCoor), 1, cvScalar(color.nBlue,color.nGreen, color.nRed), 2);
+						if (!trans)
+						{
+//							if (iter == 1)
+//								circle(*activityMap, Point(xCoor, yCoor), 1, cvScalar(color.nBlue,color.nGreen, color.nRed), 2);
+						circle(*activityMap, Point((XRes/NUM_SENSORS)*iter+xCoor, yCoor), 1, cvScalar(color.nBlue,color.nGreen, color.nRed), 2);
+						}
 						else
 							circle(*activityMap, Point(xCoor, yCoor), 1, cvScalar(color.nBlue,color.nGreen, color.nRed), 2);
 						

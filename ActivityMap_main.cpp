@@ -2,9 +2,9 @@
 #include "BackgroundDepthSubtraction.h"
 #include "Clustering.h"
 
+const int NUM_SENSORS = 3;
 
-
-void updateActivityMap(Mat& activityMap, const ActivityMap* am, const XnPoint3D* p3D, const int nP)
+void updateActivityMap(Mat& activityMap, const ActivityMap* am, const XnPoint3D* p3D, const int nP, const XnPoint3D* points2D, const XnRGB24Pixel* rgbMap, Mat& colorMap, Mat& heightMap)
 {
 	for (int i = 0; i < nP; i++)
 	{
@@ -12,10 +12,21 @@ void updateActivityMap(Mat& activityMap, const ActivityMap* am, const XnPoint3D*
 		int yC = am->findCoordinate(p3D[i].Z, MIN_Z, MAX_Z, am->depthStep);
 		int yCoor = (YRes-1) - yC; //flip around X axis.
 
+
+		XnRGB24Pixel color = rgbMap[(int)points2D[i].Y*XN_VGA_X_RES+(int)points2D[i].X];
+
 		uchar* ptr = activityMap.ptr<uchar>(yCoor);
+		uchar* ptrCM = colorMap.ptr<uchar>(yCoor);
+		float* ptrHM = heightMap.ptr<float>(yCoor);
+
+		ptrHM[xCoor] = p3D[i].Y;
 		ptr[3*xCoor] = 0;
 		ptr[3*xCoor+1] = 0;
 		ptr[3*xCoor+2] = 255;
+
+		ptrCM[3*xCoor] = color.nBlue;
+		ptrCM[3*xCoor+1] = color.nGreen;
+		ptrCM[3*xCoor+2] = color.nRed;
 
 //		circle(activityMap, Point(xCoor, yCoor), 1, Scalar::all(255), 2);
 	}
@@ -24,22 +35,22 @@ void updateActivityMap(Mat& activityMap, const ActivityMap* am, const XnPoint3D*
 
 int main()
 {
-	ActivityMap actMapCreator(2);
+	ActivityMap actMapCreator(NUM_SENSORS);
 	Clustering clusters;
 
-	KinectSensor kinects[2];
-	const XnDepthPixel* depthMaps[2];
-	const XnRGB24Pixel* rgbMaps[2];
+	KinectSensor kinects[NUM_SENSORS];
+	const XnDepthPixel* depthMaps[NUM_SENSORS];
+	const XnRGB24Pixel* rgbMaps[NUM_SENSORS];
 
-	kinects[0].initDevice(1, REF_CAM, true);
-	kinects[1].initDevice(2, REF_CAM, true);
-
-	kinects[0].startDevice();
-	kinects[1].startDevice();
+	for (int i = 0; i < NUM_SENSORS; i++)
+	{
+		kinects[i].initDevice(i, REF_CAM, true);
+		kinects[i].startDevice();
+	}
 
 	namedWindow("Activity Map");
-	Mat* activityMap;
-	Mat background, whiteBack;
+	Mat *activityMap, *heightMap;
+	Mat background, whiteBack, colorMap;
 
 	//flags
 	bool bShouldStop = false;
@@ -47,16 +58,20 @@ int main()
 	bool bgComplete = false;
 	bool deleteBG = false;
 
-	BackgroundDepthSubtraction subtractor1, subtractor2;
-	int nFPoints1, nFPoints2;
-	XnPoint3D* points2D_1 = new XnPoint3D[MAX_FORGROUND_POINTS];	
-	XnPoint3D* points2D_2 = new XnPoint3D[MAX_FORGROUND_POINTS];
-	XnPoint3D *p3D_1, *p3D_2;
+	BackgroundDepthSubtraction subtractors[NUM_SENSORS];
+	int numberOfForegroundPoints[NUM_SENSORS];
 
-	nFPoints1 = nFPoints2 = 0;
+	XnPoint3D* pointsFore2D [NUM_SENSORS];
+	XnPoint3D* points3D[NUM_SENSORS];
+
+	for (int i = 0; i < NUM_SENSORS; i++)
+	{
+		pointsFore2D[i] = new XnPoint3D[MAX_FORGROUND_POINTS];
+		numberOfForegroundPoints[i] = 0;
+	}
 
 
-//	VideoWriter w ("out.avi", CV_FOURCC('M','J','P','G'), 20, actMapCreator.getResolution(), true);
+//	VideoWriter w ("out1.avi", CV_FOURCC('M','J','P','G'), 20.0, actMapCreator.getResolution(), true);
 
 
 	/*Mat rgbImg   (XN_VGA_Y_RES, XN_VGA_X_RES, CV_8UC3);
@@ -65,18 +80,19 @@ int main()
 	int cont = 0;
 	while (!bShouldStop)
 	{
-		kinects[0].waitAndUpdate();
-		kinects[1].waitAndUpdate();
-
-		depthMaps[0] = kinects[0].getDepthMap();
-		depthMaps[1] = kinects[1].getDepthMap();
-		rgbMaps[0] = kinects[0].getRGBMap();
-		rgbMaps[1] = kinects[1].getRGBMap();
+		for (int i = 0; i < NUM_SENSORS; i++)
+		{
+			kinects[i].waitAndUpdate();
+			depthMaps[i] = kinects[i].getDepthMap();
+			rgbMaps[i] = kinects[i].getRGBMap();
+		}
 		
 		if (bgComplete && trans) //Trans must be true
 		{
+			//cont++;
 			if (first)
 			{
+				//colorMap(actMapCreator.getResolution(), CV_8UC3);
 				activityMap->copyTo(background);
 				whiteBack = Mat::Mat(actMapCreator.getResolution(), CV_8UC3);
 				Utils::initMat3u(whiteBack, 255);
@@ -87,23 +103,34 @@ int main()
 			else
 				background.copyTo(*activityMap);
 
-			nFPoints1 = subtractor1.subtraction(points2D_1, depthMaps[0]);
-			nFPoints2 = subtractor2.subtraction(points2D_2, depthMaps[1]);
-			if (nFPoints1 != 0 || nFPoints2 != 0)
+			for (int i = 0; i < NUM_SENSORS; i++)
 			{
-				p3D_1 = kinects[0].arrayBackProject(points2D_1, nFPoints1);
-				p3D_2 = kinects[1].arrayBackProject(points2D_2, nFPoints2);
-				//Transform cam 1 (RT)
-				kinects[0].transformArray(p3D_1, nFPoints1);
-
-				updateActivityMap(*activityMap, &actMapCreator, p3D_1, nFPoints1);
-				updateActivityMap(*activityMap, &actMapCreator, p3D_2, nFPoints2);
-
-				clusters.clusterImage(*activityMap);
-
-				delete[]p3D_1;
-				delete[]p3D_2;
+				numberOfForegroundPoints[i] = subtractors[i].subtraction(pointsFore2D[i], depthMaps[i]);
 			}
+
+//			if (nFPoints1 != 0 || nFPoints2 != 0)
+			{
+				whiteBack.copyTo(colorMap);
+				heightMap = new Mat(actMapCreator.getResolution(), CV_32F);
+				Utils::initMatf(*heightMap, -5000);
+
+				for (int i = 0; i < NUM_SENSORS; i++)
+				{
+					points3D[i] = kinects[i].arrayBackProject(pointsFore2D[i], numberOfForegroundPoints[i]);
+					if (kinects[i].getIdCam() != kinects[i].getIdRefCam())
+						kinects[i].transformArray(points3D[i], numberOfForegroundPoints[i]);
+
+					updateActivityMap(*activityMap, &actMapCreator, points3D[i], numberOfForegroundPoints[i], pointsFore2D[i], rgbMaps[i], colorMap, *heightMap);
+				}
+
+				imshow("Color Map", colorMap);
+				clusters.clusterImage(*activityMap, &colorMap, heightMap);
+
+				delete(heightMap);
+				for (int i = 0; i < NUM_SENSORS; i++)
+					delete[] points3D[i];
+			}
+//			w << *activityMap;
 		}
 		else
 			activityMap = actMapCreator.createActivityMap(kinects, depthMaps, rgbMaps, trans);
@@ -139,10 +166,13 @@ int main()
 			}
 		}
 	}
-	kinects[0].stopDevice();
-	kinects[1].stopDevice();
-	
-	kinects[0].shutDown();
-	kinects[1].shutDown();
+
+	for (int i = 0; i < NUM_SENSORS; i++)
+	{
+		delete[] pointsFore2D[i];
+		kinects[i].stopDevice();
+  		kinects[i].shutDown();
+	}
+
 	return 0;
 }
