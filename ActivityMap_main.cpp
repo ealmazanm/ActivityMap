@@ -30,8 +30,10 @@ void updateActivityMap(Mat& activityMap, const ActivityMap* am, ForgroundObjs* p
 }
 
 
-void updateActivityMap(Mat& activityMap, const ActivityMap* am, const XnPoint3D* p3D, const int nP, const XnPoint3D* points2D, const XnRGB24Pixel* rgbMap, Mat& colorMap, Mat& heightMap)
+void updateActivityMap(Mat& activityMap, const ActivityMap* am, const XnPoint3D* p3D, const int nP, const XnPoint3D* points2D, const XnRGB24Pixel* rgbMap, Mat& colorMap)
 {
+	Mat hightMap = Mat::Mat(activityMap.size(), CV_32F);
+	Utils::initMatf(hightMap, -5000);
 	for (int i = 0; i < nP; i++)
 	{
 		int xCoor = am->findCoordinate(p3D[i].X, MIN_X, MAX_X, am->xStep);
@@ -42,17 +44,31 @@ void updateActivityMap(Mat& activityMap, const ActivityMap* am, const XnPoint3D*
 		XnRGB24Pixel color = rgbMap[(int)points2D[i].Y*XN_VGA_X_RES+(int)points2D[i].X];
 
 		uchar* ptr = activityMap.ptr<uchar>(yCoor);
+		float* ptrH = hightMap.ptr<float>(yCoor);
 		uchar* ptrCM = colorMap.ptr<uchar>(yCoor);
-		float* ptrHM = heightMap.ptr<float>(yCoor);
 
-		ptrHM[xCoor] = p3D[i].Y;
-		ptr[3*xCoor] = 0;
-		ptr[3*xCoor+1] = 0;
-		ptr[3*xCoor+2] = 255;
+		//ptr[3*xCoor] = 0;
+		//ptr[3*xCoor+1] = 0;
+		//ptr[3*xCoor+2] = 255;
 
-		ptrCM[3*xCoor] = color.nBlue;
-		ptrCM[3*xCoor+1] = color.nGreen;
-		ptrCM[3*xCoor+2] = color.nRed;
+		if (ptrH[xCoor] < (float)p3D[i].Y)
+		{
+			ptrH[xCoor] = (float)p3D[i].Y;
+			ptrCM[3*xCoor] = color.nBlue;
+			ptrCM[3*xCoor+1] = color.nGreen;
+			ptrCM[3*xCoor+2] = color.nRed;
+			
+			ptr[3*xCoor] = color.nBlue;
+			ptr[3*xCoor+1] = color.nGreen;
+			ptr[3*xCoor+2] = color.nRed;
+
+
+		}
+
+
+		//ptrCM[3*xCoor] = color.nBlue;
+		//ptrCM[3*xCoor+1] = color.nGreen;
+		//ptrCM[3*xCoor+2] = color.nRed;
 
 //		circle(activityMap, Point(xCoor, yCoor), 1, Scalar::all(255), 2);
 	}
@@ -102,14 +118,14 @@ int main()
 	bool bgComplete = false;
 	bool deleteBG = false;
 
-	BackgroundDepthSubtraction subtractors[NUM_SENSORS];
+//	BackgroundDepthSubtraction subtractors[NUM_SENSORS];
 
 	Mat depthImages[NUM_SENSORS];
 	Mat depthMat[NUM_SENSORS];
 	Mat masks[NUM_SENSORS];
 	Mat grey;
 
-	ForgroundObjs foregroundPeople[NUM_SENSORS];
+	/*ForgroundObjs foregroundPeople[NUM_SENSORS];
 
 	for (int i = 0; i < NUM_SENSORS; i++)
 	{
@@ -117,6 +133,20 @@ int main()
 		foregroundPeople[i].setKinect(&kinects[i]);
 		depthImages[i] = Mat(XN_VGA_Y_RES, XN_VGA_X_RES, CV_8UC3);
 		depthMat[i] = Mat(XN_VGA_Y_RES, XN_VGA_X_RES, CV_16U);
+	}*/
+
+	BackgroundDepthSubtraction subtractors[NUM_SENSORS];
+	int numberOfForegroundPoints[NUM_SENSORS];
+
+	XnPoint3D* pointsFore2D [NUM_SENSORS];
+	XnPoint3D* points3D[NUM_SENSORS];
+
+	for (int i = 0; i < NUM_SENSORS; i++)
+	{
+		depthImages[i] = Mat(XN_VGA_Y_RES, XN_VGA_X_RES, CV_8UC3);
+		depthMat[i] = Mat(XN_VGA_Y_RES, XN_VGA_X_RES, CV_16U);
+		pointsFore2D[i] = new XnPoint3D[MAX_FORGROUND_POINTS];
+		numberOfForegroundPoints[i] = 0;
 	}
 
 
@@ -167,13 +197,20 @@ int main()
 			for (int i = 0; i < NUM_SENSORS; i++)
 			{
 				//numberOfForegroundPoints[i] = subtractors[i].subtraction(pointsFore2D[i], depthMaps[i]);
-				subtractors[i].subtraction(&(depthMat[i]), &(masks[i]), &foregroundPeople[i]);
+				numberOfForegroundPoints[i] = subtractors[i].subtraction(pointsFore2D[i], &(depthMat[i]), &(masks[i]));
+				//subtractors[i].subtraction(&(depthMat[i]), &(masks[i]), &foregroundPeople[i]);
 			}
 
 			whiteBack.copyTo(colorMap);
 			for (int i = 0; i < NUM_SENSORS; i++)
 			{
-				updateActivityMap(*activityMap, &actMapCreator, &foregroundPeople[i], rgbMaps[i], colorMap);
+				points3D[i] = kinects[i].arrayBackProject(pointsFore2D[i], numberOfForegroundPoints[i]);
+				if (kinects[i].getIdCam() != kinects[i].getIdRefCam())
+						kinects[i].transformArray(points3D[i], numberOfForegroundPoints[i]);
+
+				updateActivityMap(*activityMap, &actMapCreator, points3D[i], numberOfForegroundPoints[i], pointsFore2D[i], rgbMaps[i], colorMap);
+
+				//updateActivityMap(*activityMap, &actMapCreator, &foregroundPeople[i], rgbMaps[i], colorMap);
 			}
 			
 			Mat hsv;
@@ -185,11 +222,11 @@ int main()
 
 			//People detection
 			//clusters.clusterImage(*activityMap);
-			for (int i = 0; i < NUM_SENSORS; i++)
+			/*for (int i = 0; i < NUM_SENSORS; i++)
 			{
 				if (foregroundPeople[i].getNumObj() > 0)
 					foregroundPeople[i].initialize();
-			}
+			}*/
 			clock_t end = clock();
 			total += (end-start);
 			
