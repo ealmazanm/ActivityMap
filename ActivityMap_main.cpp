@@ -1,12 +1,12 @@
-#include "ActivityMap.h"
 #include "BackgroundDepthSubtraction.h"
 #include "Clustering.h"
-#include <ForgroundObjs.h>
+#include <ForegroundObjs.h>
 #include <ctime>
+#include <ActivityMap_Utils.h>
 
 const int NUM_SENSORS = 3;
 
-void updateActivityMap(Mat& activityMap, const ActivityMap* am, ForgroundObjs* peopleOut, const XnRGB24Pixel* rgbMap, Mat& colorMap)
+void updateActivityMap(Mat& activityMap, const ActivityMap_Utils* am, ForegroundObjs* peopleOut, const XnRGB24Pixel* rgbMap, Mat& colorMap)
 {
 	//Each person
 	double xVals[2] = {1, 0};
@@ -30,10 +30,10 @@ void updateActivityMap(Mat& activityMap, const ActivityMap* am, ForgroundObjs* p
 }
 
 
-void updateActivityMap(Mat& activityMap, const ActivityMap* am, const XnPoint3D* p3D, const int nP, const XnPoint3D* points2D, const XnRGB24Pixel* rgbMap, Mat& colorMap)
+void updateActivityMap(Mat& activityMap, Mat& activityMap_back, const ActivityMap_Utils* am, const XnPoint3D* p3D, const int nP, const XnPoint3D* points2D, const XnRGB24Pixel* rgbMap)
 {
 	Mat hightMap = Mat::Mat(activityMap.size(), CV_32F);
-	Utils::initMatf(hightMap, -5000);
+	Utils::initMatf(hightMap, -50000);
 	for (int i = 0; i < nP; i++)
 	{
 		int xCoor = am->findCoordinate(p3D[i].X, MIN_X, MAX_X, am->xStep);
@@ -44,33 +44,21 @@ void updateActivityMap(Mat& activityMap, const ActivityMap* am, const XnPoint3D*
 		XnRGB24Pixel color = rgbMap[(int)points2D[i].Y*XN_VGA_X_RES+(int)points2D[i].X];
 
 		uchar* ptr = activityMap.ptr<uchar>(yCoor);
+		uchar* ptr_back = activityMap_back.ptr<uchar>(yCoor);
 		float* ptrH = hightMap.ptr<float>(yCoor);
-		uchar* ptrCM = colorMap.ptr<uchar>(yCoor);
-
-		//ptr[3*xCoor] = 0;
-		//ptr[3*xCoor+1] = 0;
-		//ptr[3*xCoor+2] = 255;
 
 		if (ptrH[xCoor] < (float)p3D[i].Y)
 		{
 			ptrH[xCoor] = (float)p3D[i].Y;
-			ptrCM[3*xCoor] = color.nBlue;
-			ptrCM[3*xCoor+1] = color.nGreen;
-			ptrCM[3*xCoor+2] = color.nRed;
-			
+
 			ptr[3*xCoor] = color.nBlue;
 			ptr[3*xCoor+1] = color.nGreen;
 			ptr[3*xCoor+2] = color.nRed;
 
-
+			ptr_back[3*xCoor] = color.nBlue;
+			ptr_back[3*xCoor+1] = color.nGreen;
+			ptr_back[3*xCoor+2] = color.nRed;
 		}
-
-
-		//ptrCM[3*xCoor] = color.nBlue;
-		//ptrCM[3*xCoor+1] = color.nGreen;
-		//ptrCM[3*xCoor+2] = color.nRed;
-
-//		circle(activityMap, Point(xCoor, yCoor), 1, Scalar::all(255), 2);
 	}
 }
 
@@ -94,7 +82,7 @@ int main()
 	paths[1] = "d:/Emilio/Tracking/DataSet/s_1pers/kinect1_calib.oni";
 	paths[2] = "d:/Emilio/Tracking/DataSet/s_1pers/kinect2_calib.oni";
 
-	ActivityMap actMapCreator(NUM_SENSORS);
+	ActivityMap_Utils actMapCreator(NUM_SENSORS);
 	Clustering clusters;
 
 	KinectSensor kinects[NUM_SENSORS];
@@ -103,13 +91,14 @@ int main()
 
 	for (int i = 0; i < NUM_SENSORS; i++)
 	{
-//		kinects[i].initDevice(i, REF_CAM, true, paths[i]);
+	//	kinects[i].initDevice(i, REF_CAM, true, paths[i]);
 		kinects[i].initDevice(i, REF_CAM, true);
 		kinects[i].startDevice();
+		kinects[i].tilt(-10);
 	}
 
 	namedWindow("Activity Map");
-	Mat *activityMap;
+	Mat *activityMap, *activityMap_Back;
 	Mat background, whiteBack, colorMap;
 
 	//flags
@@ -125,7 +114,7 @@ int main()
 	Mat masks[NUM_SENSORS];
 	Mat grey;
 
-	/*ForgroundObjs foregroundPeople[NUM_SENSORS];
+	/*ForegroundObjs foregroundPeople[NUM_SENSORS];
 
 	for (int i = 0; i < NUM_SENSORS; i++)
 	{
@@ -148,6 +137,9 @@ int main()
 		pointsFore2D[i] = new XnPoint3D[MAX_FORGROUND_POINTS];
 		numberOfForegroundPoints[i] = 0;
 	}
+
+	Point centres[10];
+	double angles[10];
 
 
 //	VideoWriter w ("out_color.avi", CV_FOURCC('M','J','P','G'), 20.0, actMapCreator.getResolution(), true);
@@ -183,16 +175,14 @@ int main()
 			cont++;
 			if (first)
 			{
-				//colorMap(actMapCreator.getResolution(), CV_8UC3);
-				activityMap->copyTo(background);
 				whiteBack = Mat::Mat(actMapCreator.getResolution(), CV_8UC3);
+				activityMap = new Mat(actMapCreator.getResolution(), CV_8UC3);
+				activityMap_Back = new Mat(actMapCreator.getResolution(), CV_8UC3);
 				Utils::initMat3u(whiteBack, 255);
 				first = false;
 			}
-			else if (deleteBG)
-				whiteBack.copyTo(*activityMap);
-			else
-				background.copyTo(*activityMap);
+			whiteBack.copyTo(*activityMap);
+			background.copyTo(*activityMap_Back);
 
 			for (int i = 0; i < NUM_SENSORS; i++)
 			{
@@ -201,27 +191,48 @@ int main()
 				//subtractors[i].subtraction(&(depthMat[i]), &(masks[i]), &foregroundPeople[i]);
 			}
 
-			whiteBack.copyTo(colorMap);
+			
 			for (int i = 0; i < NUM_SENSORS; i++)
 			{
 				points3D[i] = kinects[i].arrayBackProject(pointsFore2D[i], numberOfForegroundPoints[i]);
-				if (kinects[i].getIdCam() != kinects[i].getIdRefCam())
-						kinects[i].transformArray(points3D[i], numberOfForegroundPoints[i]);
+				kinects[i].transformArray(points3D[i], numberOfForegroundPoints[i]);
 
-				updateActivityMap(*activityMap, &actMapCreator, points3D[i], numberOfForegroundPoints[i], pointsFore2D[i], rgbMaps[i], colorMap);
+				updateActivityMap(*activityMap, *activityMap_Back, &actMapCreator, points3D[i], numberOfForegroundPoints[i], pointsFore2D[i], rgbMaps[i]);
 
 				//updateActivityMap(*activityMap, &actMapCreator, &foregroundPeople[i], rgbMaps[i], colorMap);
 			}
 			
-			Mat hsv;
-			cvtColor(colorMap, hsv, CV_BGR2HSV);
+			Mat aMap_hsv, gray, mask;
+			cvtColor(*activityMap, aMap_hsv, CV_BGR2HSV);
+			cvtColor(*activityMap, gray, CV_RGB2GRAY);
+			//Foreground = 255; Background = 0
+			threshold(gray, mask, 240, 255, THRESH_BINARY_INV);
 	
-				//MeanShift Tracker
-//				clusters.clusterImage(&colorMap, &hsv);
-//				clusters.drawPeople(*activityMap);
+			//MeanShift Tracker
+			clusters.clusterImage(&aMap_hsv, mask);
+			if (deleteBG)
+				clusters.drawPeople(*activityMap);
+			else
+				clusters.drawPeople(*activityMap_Back);
 
 			//People detection
-			//clusters.clusterImage(*activityMap);
+			//int numPeople = clusters.clusterImage(*activityMap, centres, angles);
+			//for (int i = 0; i < numPeople; i++)
+			//{
+			//	if (deleteBG)
+			//	{
+			//		ellipse(*activityMap, centres[i], Size(BIG_AXIS, SMALL_AXIS), angles[i], 0.0, 360, Scalar(0, 0, 255), 2);
+ 		//			circle(*activityMap, centres[i], SMALL_AXIS, Scalar(0, 0, 255), 2);
+			//	}
+			//	else
+			//	{
+			//		ellipse(*activityMap_Back, centres[i], Size(BIG_AXIS, SMALL_AXIS), angles[i], 0.0, 360, Scalar(0, 0, 255), 2);
+ 		//			circle(*activityMap_Back, centres[i], SMALL_AXIS, Scalar(0, 0, 255), 2);
+			//	}
+
+			//}
+
+
 			/*for (int i = 0; i < NUM_SENSORS; i++)
 			{
 				if (foregroundPeople[i].getNumObj() > 0)
@@ -229,12 +240,20 @@ int main()
 			}*/
 			clock_t end = clock();
 			total += (end-start);
+
+			if (deleteBG)
+				imshow("Activity Map", *activityMap);
+			else
+				imshow("Activity Map", *activityMap_Back);
 			
 		}
 		else
-			activityMap = actMapCreator.createActivityMap(kinects, depthMaps, rgbMaps, trans);
+		{
+			background = *(actMapCreator.createActivityMap(kinects, depthMaps, rgbMaps, trans));
+			imshow("Activity Map", background);
+		}
 		
-		imshow("Activity Map", *activityMap);
+
 		
 //		w << colorMap;
 //		imwrite("out.jpg", *activityMap);
